@@ -1,25 +1,32 @@
 using System;
-using UnityCTVisualizer;
+using UnityEngine;
 
-public class DicomImporter : IImporter
-{
-    public DicomImporter(string datasetPath) {
-        m_DatasetPath = datasetPath;
-    }
+namespace UnityCTVisualizer {
+    public class DicomImporter : IImporter {
+        public string DatsetPath { get => m_DatasetPath; }
+        public ColorDepth ColorDepth { get => m_ColorDepth; }
 
-    private string m_DatasetPath;
-    public string DatsetPath { get => m_DatasetPath; }
-    public UVDSMetadata ImportMetadata() {
-        return null;
-    }
+        private readonly string m_DatasetPath;
+        private readonly ColorDepth m_ColorDepth;
 
-    public bool ImportChunk(UInt32 chunk_id, int brickSize, out byte[] data) {
-        return true;
-    }
+        public DicomImporter(string dataset_path, string[] _) {
+            m_DatasetPath = dataset_path;
+        }
 
-    public bool ImportChunk(UInt32 chunk_id, int brickSize, out UInt16[] data) {
-        data = null;
-        return true;
+        public Metadata ImportMetadata() {
+            throw new NotImplementedException();
+        }
+
+        public bool ImportChunk(UInt32 brick_id, int brick_size, Vector3Int dims, out byte[] data) {
+            data = null;
+            return true;
+        }
+
+        public bool ImportChunk(UInt32 brick_id, int brick_size, Vector3Int dims, out UInt16[] data) {
+            data = null;
+            return true;
+        }
+
+        public bool IsMetadataImportable { get => true; }
     }
-    public bool IsMetadataImportable { get => true; }
 }
