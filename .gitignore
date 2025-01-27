@@ -85,6 +85,11 @@ Assets/UVDSDatasets/*
 # MacOS
 Assets/.DS_Store
 
+# packages
+Assets/Packages
+Assets/XR
+Assets/XRI
+
 # venv
 venv/
 
