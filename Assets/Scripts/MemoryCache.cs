@@ -4,14 +4,14 @@ using System.Diagnostics;
 
 public class CacheEntry<T> where T : unmanaged {
     public readonly T[] data;
-    public readonly T max;
     public readonly T min;
+    public readonly T max;
     public long timestamp;
 
-    public CacheEntry(T[] data, T max, T min) {
+    public CacheEntry(T[] data, T min, T max) {
         this.data = data;
-        this.max = max;
         this.min = min;
+        this.max = max;
         this.timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
     }
 };
@@ -31,7 +31,7 @@ public class MemoryCache<T> where T : unmanaged {
 
     public MemoryCache(long memory_size_limit_mb, long brick_size_bytes) {
         m_capacity = (int)Math.Ceiling((memory_size_limit_mb / (brick_size_bytes / 1024.0f)));
-        m_cache = new(Environment.ProcessorCount * 2, m_capacity);
+        m_cache = new(Environment.ProcessorCount, m_capacity);
     }
 
     public bool Set(UInt32 id, CacheEntry<T> entry) {
