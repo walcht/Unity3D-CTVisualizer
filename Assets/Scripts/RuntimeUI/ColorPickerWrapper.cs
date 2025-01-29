@@ -1,13 +1,11 @@
-using HSVPicker;
 using System;
+using HSVPicker;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace UnityCTVisualizer
-{
+namespace UnityCTVisualizer {
     [RequireComponent(typeof(RectTransform), typeof(Canvas))]
-    public class ColorPickerWrapper : MonoBehaviour
-    {
+    public class ColorPickerWrapper : MonoBehaviour {
         /// <summary>
         /// Invoked when the user is done with picking a color (e.g., through a button click action).
         /// </summary>
@@ -21,8 +19,7 @@ namespace UnityCTVisualizer
         public ColorPicker m_ColorPicker;
         public Button m_ColorPickerDone;
 
-        void Awake()
-        {
+        void Awake() {
             m_ColorPickerDone.onClick.AddListener(
                 () => ColorPickerDone?.Invoke(m_ColorPicker.CurrentColor)
             );
@@ -33,8 +30,7 @@ namespace UnityCTVisualizer
         /// Initializes the color picker. Call this before enabling a ColorPickerWrapper component.
         /// </summary>
         /// <param name="initialColor">Initial color to set for the color picker</param>
-        public void Init(Color initialColor)
-        {
+        public void Init(Color initialColor) {
             m_ColorPicker.CurrentColor = initialColor;
         }
     }

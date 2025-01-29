@@ -1,13 +1,9 @@
 using System;
 using System.IO;
 using K4os.Compression.LZ4;
+using Newtonsoft.Json;
 using UnityEngine;
 using UnityEngine.Assertions;
-
-using Newtonsoft.Json;
-using UnityEditor.Build;
-using System.Runtime.ExceptionServices;
-using Unity.Properties;
 
 namespace UnityCTVisualizer {
     public enum ColorDepth {
@@ -89,7 +85,7 @@ namespace UnityCTVisualizer {
             }
             // assign chunk filepaths for each resolution level
             ChunkFilepaths = new string[NbrResolutionLvls + 1][];
-            for (int res_lvl = 0; res_lvl <= NbrResolutionLvls; ++res_lvl) {
+            for (int res_lvl = 0; res_lvl < NbrResolutionLvls; ++res_lvl) {
                 string res_directory = Path.Join(RootFilepath, $"resolution_level_{res_lvl}");
                 int nbr_chunks = NbrChunksPerResolutionLvl[res_lvl].x * NbrChunksPerResolutionLvl[res_lvl].y
                     * NbrChunksPerResolutionLvl[res_lvl].z;

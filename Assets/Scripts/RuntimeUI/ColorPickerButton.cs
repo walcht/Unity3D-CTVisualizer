@@ -1,11 +1,9 @@
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace UnityCTVisualizer
-{
+namespace UnityCTVisualizer {
     [RequireComponent(typeof(Image), typeof(Button))]
-    public class ColorPickerButton : MonoBehaviour
-    {
+    public class ColorPickerButton : MonoBehaviour {
         public event VoidHandler OnClick;
 
         /// <summary>
@@ -26,8 +24,7 @@ namespace UnityCTVisualizer
         Button m_BtnComponent;
         Color m_CachedColor;
 
-        void Awake()
-        {
+        void Awake() {
             m_BtnComponent.interactable = false;
             m_CachedColor = m_ImgComponent.color;
             m_CachedColor.a = m_ColorDefaultAlpha;
@@ -35,16 +32,14 @@ namespace UnityCTVisualizer
             m_BtnComponent.onClick.AddListener(() => OnClick?.Invoke());
         }
 
-        public void SetColor(Color color)
-        {
+        public void SetColor(Color color) {
             m_CachedColor.r = color.r;
             m_CachedColor.g = color.g;
             m_CachedColor.b = color.b;
             m_ImgComponent.color = m_CachedColor;
         }
 
-        public void SetInteractiveness(bool val)
-        {
+        public void SetInteractiveness(bool val) {
             m_BtnComponent.interactable = val;
         }
     }

@@ -3,7 +3,6 @@
     "com.cysharp.unitask": "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.judahperez.hsvcolorpicker": "3.3.0",
-    "com.magicleap.unitysdk": "2.5.0",
     "com.unity.2d.sprite": "1.0.0",
     "com.unity.collab-proxy": "2.3.1",
     "com.unity.feature.development": "1.0.1",
@@ -56,13 +55,6 @@
         "com.judahperez.hsvcolorpicker",
         "com.yasirkula.simplefilebrowser"
       ]
-    },
-    {
-      "url": "https://registry.npmjs.org",
-      "scopes": [
-        "com.magicleap"
-      ],
-      "name": "Magic Leap"
     }
   ]
 }

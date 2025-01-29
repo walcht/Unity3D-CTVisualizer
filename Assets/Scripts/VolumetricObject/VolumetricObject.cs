@@ -1,13 +1,11 @@
 // #define DEBUG_BRICK_WIREFRAMES
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using System.Collections.Concurrent;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Assertions;
-using Unity.Mathematics;
 
 namespace UnityCTVisualizer {
 
@@ -109,7 +107,7 @@ namespace UnityCTVisualizer {
             // using the native plugin since these APIs already impose a 2GBs per-resource limit
             //
             // Important: if the texture is created using Unity's Texture3D with createUninitialized set to true
-            // and you try to visualize some uninitailized blocks you might observe some artifacts (duh moment)
+            // and you try to visualize some uninitailized blocks you might observe some artifacts (duh?!)
             switch (SystemInfo.graphicsDeviceType) {
                 case UnityEngine.Rendering.GraphicsDeviceType.Direct3D11:
                 case UnityEngine.Rendering.GraphicsDeviceType.Direct3D12: {
@@ -120,7 +118,7 @@ namespace UnityCTVisualizer {
                     Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
                         + "Using Unity's API to create the 3D texture");
                     m_brick_cache = new Texture3D(m_volume_dataset.BrickCacheSize.x, m_volume_dataset.BrickCacheSize.y,
-                        m_volume_dataset.BrickCacheSize.z, m_brick_cache_format, mipChain: false, createUninitialized: false);
+                        m_volume_dataset.BrickCacheSize.z, m_brick_cache_format, mipChain: false, createUninitialized: true);
                     // set texture wrapping to Clamp to remove edge/face artifacts
                     m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
                     m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
@@ -282,8 +280,8 @@ namespace UnityCTVisualizer {
                     // update global state
                     m_volume_dataset.ComputeVolumeOffset(brick_id, out Int32 x, out Int32 y, out Int32 z);
 #if DEBUG_VERBOSE_2
-#endif
                     Debug.Log($"brick id: i={brick_id}; volume offset: x={x} y={y} z={z}");
+#endif
                     TextureSubPlugin.UpdateTextureSubImage3DParams(m_brick_cache_ptr, x, y, z,
                         brick_size, brick_size, brick_size, gc_data.AddrOfPinnedObject(), level: 0,
                         format: m_tex_plugin_format);
@@ -346,7 +344,7 @@ namespace UnityCTVisualizer {
                 case MaxIterations._1024: maxIters = 1024; break;
                 case MaxIterations._2048: maxIters = 2048; break;
                 default:
-                throw new UnexpectedEnumValueException<MaxIterations>(value);
+                throw new Exception(value.ToString());
             }
             // do NOT update immediately as the brick cache texture could not be available
             m_max_iterations_update = StartCoroutine(UpdateWhenBrickCacheReady(() => {
@@ -390,7 +388,7 @@ namespace UnityCTVisualizer {
                 break;
 
                 default:
-                throw new UnexpectedEnumValueException<INTERPOLATION>(value);
+                throw new Exception(value.ToString());
             }
         }
 

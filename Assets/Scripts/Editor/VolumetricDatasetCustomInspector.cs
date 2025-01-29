@@ -4,11 +4,9 @@ using UnityEditor.UIElements;
 using UnityEngine;
 using UnityEngine.UIElements;
 
-namespace UnityCTVisualizer
-{
+namespace UnityCTVisualizer {
     [CustomEditor(typeof(VolumetricDataset))]
-    public class VolumetricDatasetCustomInspector : Editor
-    {
+    public class VolumetricDatasetCustomInspector : Editor {
         public VisualTreeAsset m_VolumetricDatasetInspectorXML;
 
         VolumetricDataset m_VolumetricDataset;
@@ -23,8 +21,7 @@ namespace UnityCTVisualizer
         SerializedProperty m_MinDensity;
         SerializedProperty m_MaxDensity;
 
-        private void OnEnable()
-        {
+        private void OnEnable() {
             m_VolumetricDataset = (VolumetricDataset)target;
             m_DatasetPath = serializedObject.FindProperty("m_DatasetPath");
             m_ImageWidth = serializedObject.FindProperty("m_ImageWidth");
@@ -38,15 +35,13 @@ namespace UnityCTVisualizer
             SceneView.duringSceneGui += OnSceneViewGUI;
         }
 
-        private void OnDisable()
-        {
+        private void OnDisable() {
             SceneView.duringSceneGui -= OnSceneViewGUI;
         }
 
         private void OnSceneViewGUI(SceneView sv) { }
 
-        public override VisualElement CreateInspectorGUI()
-        {
+        public override VisualElement CreateInspectorGUI() {
             VisualElement root = m_VolumetricDatasetInspectorXML.Instantiate();
             // UXML element queries
             Button select_ds_path_btn = root.Q<Button>(name: "select-dataset-path");
@@ -70,8 +65,7 @@ namespace UnityCTVisualizer
                 || volumeMinDensity == null
                 || volumeMaxDensity == null
                 || generate_densities_texture == null
-            )
-            {
+            ) {
                 Debug.LogError(
                     "at least one crucial UXML element was not found. Aborting custom editor ..."
                 );
@@ -88,23 +82,20 @@ namespace UnityCTVisualizer
             volumeMaxDensity.BindProperty(m_MaxDensity);
             // callbacks
             select_ds_path_btn.RegisterCallback<ClickEvent>(
-                (ClickEvent evt) =>
-                {
+                (ClickEvent evt) => {
                     string path = EditorUtility.OpenFilePanel(
                         "Select a Unity Volumetric DataSet (UVDS) file",
                         "",
                         "uvds"
                     );
-                    if (File.Exists(path))
-                    {
+                    if (File.Exists(path)) {
                         // Importer.ImportUVDS(path, m_VolumetricDataset);
                     }
                     evt.StopPropagation();
                 }
             );
             generate_densities_texture.RegisterCallback<ClickEvent>(
-                (ClickEvent evt) =>
-                {
+                (ClickEvent evt) => {
                     // string exportPath = m_VolumetricDataset.ExportDensitiesTexture();
                     // Debug.Log($"exported densities Texture3D to: {exportPath}");
                     evt.StopPropagation();

@@ -3,24 +3,19 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-namespace UnityCTVisualizer
-{
+namespace UnityCTVisualizer {
     [RequireComponent(typeof(RawImage))]
-    public class HistogramUI : MonoBehaviour, IPointerClickHandler
-    {
+    public class HistogramUI : MonoBehaviour, IPointerClickHandler {
         public event Action<Vector2> OnAddAlphaControlPoint;
 
         RectTransform m_RectTransform;
 
-        void Awake()
-        {
+        void Awake() {
             m_RectTransform = GetComponent<RectTransform>();
         }
 
-        public void OnPointerClick(PointerEventData eventData)
-        {
-            if (eventData.button == PointerEventData.InputButton.Right)
-            {
+        public void OnPointerClick(PointerEventData eventData) {
+            if (eventData.button == PointerEventData.InputButton.Right) {
                 Vector2 rectLocalPos;
                 RectTransformUtility.ScreenPointToLocalPointInRectangle(
                     m_RectTransform,

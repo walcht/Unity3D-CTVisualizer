@@ -1,10 +1,8 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-namespace UnityCTVisualizer
-{
-    public class VolumetricObjectController : MonoBehaviour
-    {
+namespace UnityCTVisualizer {
+    public class VolumetricObjectController : MonoBehaviour {
         [Range(0.0f, 0.5f)]
         public float m_ScaleSpeed;
 
@@ -26,8 +24,7 @@ namespace UnityCTVisualizer
         Vector3 m_OriginalScale;
         Vector3 m_MaxScaleVect;
 
-        void Awake()
-        {
+        void Awake() {
             m_Transform = GetComponent<Transform>();
             m_InputLayer = new UnityCTVisualizerInput();
 
@@ -47,35 +44,30 @@ namespace UnityCTVisualizer
 
         float t = 0.0f;
 
-        void OnScale(InputAction.CallbackContext context)
-        {
+        void OnScale(InputAction.CallbackContext context) {
             float scroll = context.ReadValue<float>();
-            if (scroll > 0)
-            {
+            if (scroll > 0) {
                 t = Mathf.Clamp01(t + m_ScaleSpeed * m_ScaleSpeedModifier);
                 m_Transform.localScale = Vector3.Lerp(m_OriginalScale, m_MaxScaleVect, t);
             }
             // this has to be done because on linux we get 120, 0, -120
-            else if (scroll < 0)
-            {
+            else if (scroll < 0) {
                 t = Mathf.Clamp01(t - m_ScaleSpeed * m_ScaleSpeedModifier);
                 m_Transform.localScale = Vector3.Lerp(m_OriginalScale, m_MaxScaleVect, t);
             }
         }
 
         private void Update() {
-            if (m_Rotate) { 
-            m_Transform.Rotate(0.0f, Time.deltaTime * m_RotationSpeed, 0.0f);
+            if (m_Rotate) {
+                m_Transform.Rotate(0.0f, Time.deltaTime * m_RotationSpeed, 0.0f);
             }
         }
 
-        void OnEnable()
-        {
+        void OnEnable() {
             m_InputLayer.VolumetricObjectControls.Enable();
         }
 
-        void OnDisable()
-        {
+        void OnDisable() {
             m_InputLayer.VolumetricObjectControls.Disable();
         }
     }

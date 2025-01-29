@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Concurrent;
-using System.Diagnostics;
 
 public class CacheEntry<T> where T : unmanaged {
     public readonly T[] data;
@@ -12,7 +11,7 @@ public class CacheEntry<T> where T : unmanaged {
         this.data = data;
         this.min = min;
         this.max = max;
-        this.timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
+        timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds();
     }
 };
 
@@ -20,7 +19,7 @@ public class MemoryCache<T> where T : unmanaged {
     public event Action<UInt32, CacheEntry<T>> CacheEntryLoaded;
     private readonly ConcurrentDictionary<UInt32, CacheEntry<T>> m_cache;
 
-    private object m_lock = new object();
+    private object m_lock = new();
 
     /// <summary>
     ///     Memory size limit in MB of the dictionary's entries (i.e., not including

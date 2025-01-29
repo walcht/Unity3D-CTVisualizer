@@ -3,10 +3,8 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace UnityCTVisualizer
-{
-    public class ClampUI : MonoBehaviour
-    {
+namespace UnityCTVisualizer {
+    public class ClampUI : MonoBehaviour {
         /// <summary>
         /// Invoked when toggle is set/unset
         /// </summary>
@@ -33,8 +31,7 @@ namespace UnityCTVisualizer
         [SerializeField]
         private TMP_InputField m_InputField;
 
-        private void Awake()
-        {
+        private void Awake() {
             // default state
             m_InputField.text = DEFAULT_VALUE.ToString();
             m_InputField.gameObject.SetActive(false);
@@ -43,11 +40,9 @@ namespace UnityCTVisualizer
             m_InputField.onSubmit.AddListener(OnInputFieldSubmitHandler);
         }
 
-        private void OnToggleChangeHandler(bool value)
-        {
+        private void OnToggleChangeHandler(bool value) {
             OnToggleChange?.Invoke(value);
-            if (value)
-            {
+            if (value) {
                 OnInputFieldSubmit?.Invoke(Single.Parse(m_InputField.text));
                 m_InputField.gameObject.SetActive(true);
                 return;
@@ -55,8 +50,7 @@ namespace UnityCTVisualizer
             m_InputField.gameObject.SetActive(false);
         }
 
-        private void OnInputFieldSubmitHandler(string newVal)
-        {
+        private void OnInputFieldSubmitHandler(string newVal) {
             OnInputFieldSubmit?.Invoke(Single.Parse(newVal));
         }
     }

@@ -1,7 +1,5 @@
 using TMPro;
 using UnityEngine;
-using System.Threading;
-using UnityEngine.UIElements;
 
 namespace UnityCTVisualizer {
     public interface IProgressHandler {

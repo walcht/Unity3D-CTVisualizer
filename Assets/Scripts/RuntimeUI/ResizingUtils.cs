@@ -1,5 +1,5 @@
-using TMPro;
 using System;
+using TMPro;
 
 public static class ResizingUtils {
     public static float GetOptimalFontSize(TMP_Text[] texts) {

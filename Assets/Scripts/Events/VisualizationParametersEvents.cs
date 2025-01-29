@@ -1,5 +1,4 @@
 using System;
-using UnityCTVisualizer;
 
 namespace UnityCTVisualizer {
     public static class VisualizationParametersEvents {
