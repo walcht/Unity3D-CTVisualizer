@@ -1,13 +1,23 @@
 // #define DEBUG_BRICK_WIREFRAMES
+
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization.Json;
 using System.Threading.Tasks;
+using TextureSubPlugin;
 using UnityEngine;
 using UnityEngine.Assertions;
+using UnityEngine.Rendering;
 
 namespace UnityCTVisualizer {
+
+    public enum RenderingMode {
+        IN_CORE = 0,
+        OUT_OF_CORE = 1,
+    }
 
     [RequireComponent(typeof(MeshRenderer)), RequireComponent(typeof(MeshFilter))]
     public class VolumetricObject : MonoBehaviour {
@@ -30,15 +40,21 @@ namespace UnityCTVisualizer {
         private Coroutine m_interpolation_method_update;
         private Coroutine m_max_iterations_update;
 
-
         /////////////////////////////////
         // PARAMETERS
         /////////////////////////////////
+        private RenderingMode m_rendering_mode;
         private Texture3D m_brick_cache = null;
         private int m_brick_cache_nbr_bricks;
         private IntPtr m_brick_cache_ptr = IntPtr.Zero;
         private TextureFormat m_brick_cache_format;
         private int m_tex_plugin_format;
+        private int m_brick_size = 128;
+        private Vector3Int m_brick_cache_size;
+        private float m_brick_cache_size_mb;
+        private int m_resolution_lvl;  // only for in-core rendering
+        private float MM_TO_METERS = 0.001f;
+
 
         // TODO: I don't know how to make this less ugly...
         private MemoryCache<UInt16> m_cache_uint16;
@@ -47,6 +63,12 @@ namespace UnityCTVisualizer {
         // private ComputeBuffer m_brick_cache_usage_buffer = null;
         // private ComputeBuffer m_brick_cache_misses_buffer = null;
         // private System.UInt32[] m_brick_cache_usage_buffer_reset;
+
+
+        /////////////////////////////////
+        // OBJECT POOLS
+        /////////////////////////////////
+        private UnmanagedObjectPool<TextureSubImage3DParams> m_tex_params_pool;
 
 
         /////////////////////////////////
@@ -67,11 +89,53 @@ namespace UnityCTVisualizer {
             m_material = GetComponent<MeshRenderer>().sharedMaterial;
         }
 
-        public void Init(VolumetricDataset volumetricDataset, IProgressHandler progressHandler = null) {
+        public void Init(VolumetricDataset volumetricDataset, RenderingMode rendering_mode,
+            int brick_cache_dim_size = -1, int resolution_lvl = 0, IProgressHandler progressHandler = null) {
+
             if (volumetricDataset == null)
                 throw new ArgumentNullException("the provided volumetric dataset should be a non-null reference");
+
+            m_rendering_mode = rendering_mode;
             m_volume_dataset = volumetricDataset;
             m_progress_handler = progressHandler;
+            m_resolution_lvl = resolution_lvl;
+
+            CVDSMetadata metadata = volumetricDataset.Metadata;
+            if (rendering_mode == RenderingMode.IN_CORE) {
+                if (m_resolution_lvl < 0 || m_resolution_lvl >= metadata.NbrResolutionLvls) {
+                    throw new Exception($"invalid provided resolution level for in-core rendering: {m_resolution_lvl}");
+                }
+                m_brick_cache_size = new Vector3Int(
+                    metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x * metadata.ChunkSize,
+                    metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y * metadata.ChunkSize,
+                    metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z * metadata.ChunkSize
+                );
+            } else {
+                if (brick_cache_dim_size <= 0 || (brick_cache_dim_size % 2) != 0) {
+                    throw new Exception($"invalid provided brick cache dimension size for out-of-core rendering: {brick_cache_dim_size}");
+                }
+                m_brick_cache_size = new Vector3Int(
+                    brick_cache_dim_size,
+                    brick_cache_dim_size,
+                    brick_cache_dim_size
+                );
+            }
+            m_brick_cache_size_mb = metadata.ColorDepth switch {
+                ColorDepth.UINT8 => (m_brick_cache_size.x / 1024.0f) * (m_brick_cache_size.y / 1024.0f)
+                                    * m_brick_cache_size.z * sizeof(byte),
+                ColorDepth.UINT16 => (m_brick_cache_size.x / 1024.0f) * (m_brick_cache_size.y / 1024.0f)
+                                    * m_brick_cache_size.z * sizeof(UInt16),
+                _ => throw new NotImplementedException(metadata.ColorDepth.ToString()),
+            };
+
+            // log useful info
+            Debug.Log($"rendering mode set to: {m_rendering_mode}");
+            Debug.Log($"number of frames in flight: {QualitySettings.maxQueuedFrames}");
+            Debug.Log($"brick cache size dimensions: {m_brick_cache_size}");
+            Debug.Log($"brick cache size: {m_brick_cache_size_mb}MB");
+
+            // initialize object pools
+            m_tex_params_pool = new(volumetricDataset.MAX_BRICK_UPLOADS_PER_FRAME);
 
             StartCoroutine(InternalInit());
         }
@@ -79,27 +143,24 @@ namespace UnityCTVisualizer {
         private IEnumerator InternalInit() {
             yield return new WaitUntil(() => (m_volume_dataset != null) && (m_transfer_function != null));
 
-            int brick_size = m_volume_dataset.BrickSize;
-
-            // rotate the volume according to provided Euler angles
-            gameObject.transform.rotation = Quaternion.Euler(m_volume_dataset.Metadata.EulerRotation);
-
             // initialize colordepth-dependent stuff
             switch (m_volume_dataset.Metadata.ColorDepth) {
                 case ColorDepth.UINT8: {
                     m_brick_cache_format = TextureFormat.R8;
-                    m_tex_plugin_format = (int)TextureSubPlugin.Format.R8_UINT;
-                    m_cache_uint8 = new MemoryCache<byte>(m_volume_dataset.MEMORY_CACHE_MB, (int)Math.Pow(brick_size, 3));
+                    m_tex_plugin_format = (int)TextureSubPlugin.Format.UR8;
+                    m_cache_uint8 = new MemoryCache<byte>(m_volume_dataset.MEMORY_CACHE_MB,
+                        (int)Math.Pow(m_brick_size, 3));
                     break;
                 }
                 case ColorDepth.UINT16: {
                     m_brick_cache_format = TextureFormat.R16;
-                    m_tex_plugin_format = (int)TextureSubPlugin.Format.R16_UINT;
-                    m_cache_uint16 = new MemoryCache<UInt16>(m_volume_dataset.MEMORY_CACHE_MB, (int)Math.Pow(brick_size, 3) * sizeof(UInt16));
+                    m_tex_plugin_format = (int)TextureSubPlugin.Format.UR16;
+                    m_cache_uint16 = new MemoryCache<UInt16>(m_volume_dataset.MEMORY_CACHE_MB,
+                        (int)Math.Pow(m_brick_size, 3) * sizeof(UInt16));
                     break;
                 }
                 default:
-                throw new Exception($"unknown ColourDepth value: {m_volume_dataset.Metadata.ColorDepth}");
+                throw new Exception($"unknown ColorDepth value: {m_volume_dataset.Metadata.ColorDepth}");
             }
 
             // create the brick cache texture(s) natively in case of OpenGL/Vulkan to overcome
@@ -109,16 +170,16 @@ namespace UnityCTVisualizer {
             // Important: if the texture is created using Unity's Texture3D with createUninitialized set to true
             // and you try to visualize some uninitailized blocks you might observe some artifacts (duh?!)
             switch (SystemInfo.graphicsDeviceType) {
-                case UnityEngine.Rendering.GraphicsDeviceType.Direct3D11:
-                case UnityEngine.Rendering.GraphicsDeviceType.Direct3D12: {
+                case GraphicsDeviceType.Direct3D11:
+                case GraphicsDeviceType.Direct3D12: {
                     if (m_volume_dataset.BRICK_CACHE_SIZE_MB > 2048) {
                         throw new NotImplementedException("multiple 3D texture brick caches are not yet implemented. "
                             + "Choose a smaller than 2GB brick cache or use a different graphics API (e.g., Vulkan/OpenGLCore)");
                     }
                     Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
                         + "Using Unity's API to create the 3D texture");
-                    m_brick_cache = new Texture3D(m_volume_dataset.BrickCacheSize.x, m_volume_dataset.BrickCacheSize.y,
-                        m_volume_dataset.BrickCacheSize.z, m_brick_cache_format, mipChain: false, createUninitialized: true);
+                    m_brick_cache = new Texture3D(m_brick_cache_size.x, m_brick_cache_size.y, m_brick_cache_size.z,
+                        m_brick_cache_format, mipChain: false, createUninitialized: true);
                     // set texture wrapping to Clamp to remove edge/face artifacts
                     m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
                     m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
@@ -127,33 +188,41 @@ namespace UnityCTVisualizer {
                     Assert.AreNotEqual(m_brick_cache_ptr, IntPtr.Zero);
                     break;
                 }
-                case UnityEngine.Rendering.GraphicsDeviceType.OpenGLCore:
-                case UnityEngine.Rendering.GraphicsDeviceType.Vulkan: {
+                case GraphicsDeviceType.OpenGLCore:
+                case GraphicsDeviceType.Vulkan: {
                     if (m_volume_dataset.BRICK_CACHE_SIZE_MB > 2048) {
                         Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is larger than 2GB. "
                             + "Using native plugin to create the brick cache 3D texture");
-                        TextureSubPlugin.UpdateCreateTexture3DParams((UInt32)m_volume_dataset.BrickCacheSize.x,
-                            (UInt32)m_volume_dataset.BrickCacheSize.y, (UInt32)m_volume_dataset.BrickCacheSize.z,
-                            m_tex_plugin_format);
-                        GL.IssuePluginEvent(TextureSubPlugin.GetRenderEventFunc(),
-                                (int)TextureSubPlugin.Event.CreateTexture3D);
-
+                        CommandBuffer cmd_buffer = new();
+                        UInt32 texture_id = 0;
+                        CreateTexture3DParams args = new() {
+                            texture_id = texture_id,
+                            width = (UInt32)m_brick_cache_size.x,
+                            height = (UInt32)m_brick_cache_size.y,
+                            depth = (UInt32)m_brick_cache_size.z,
+                            format = m_tex_plugin_format,
+                        };
+                        IntPtr args_ptr = Marshal.AllocHGlobal(Marshal.SizeOf<CreateTexture3DParams>());
+                        Marshal.StructureToPtr(args, args_ptr, false);
+                        cmd_buffer.IssuePluginEventAndData(API.GetRenderEventFunc(), (int)TextureSubPlugin.Event.CreateTexture3D,
+                            args_ptr);
+                        Graphics.ExecuteCommandBuffer(cmd_buffer);
                         yield return new WaitForEndOfFrame();
+                        Marshal.FreeHGlobal(args_ptr);
 
-                        m_brick_cache_ptr = TextureSubPlugin.RetrieveCreatedTexture3D();
+                        m_brick_cache_ptr = API.RetrieveCreatedTexture3D(texture_id);
                         if (m_brick_cache_ptr == IntPtr.Zero) {
                             throw new NullReferenceException("native bricks cache pointer is nullptr " +
                                 "make sure that your platform supports native code plugins");
                         }
-                        m_brick_cache = Texture3D.CreateExternalTexture(m_volume_dataset.BrickCacheSize.x,
-                            m_volume_dataset.BrickCacheSize.y, m_volume_dataset.BrickCacheSize.z, m_brick_cache_format,
-                            mipChain: false, nativeTex: m_brick_cache_ptr);
+                        m_brick_cache = Texture3D.CreateExternalTexture(m_brick_cache_size.x, m_brick_cache_size.y,
+                            m_brick_cache_size.z, m_brick_cache_format, mipChain: false, nativeTex: m_brick_cache_ptr);
                         break;
                     }
                     Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
                         + "Using Unity's API to create the 3D texture");
-                    m_brick_cache = new Texture3D(m_volume_dataset.BrickCacheSize.x, m_volume_dataset.BrickCacheSize.y,
-                        m_volume_dataset.BrickCacheSize.z, m_brick_cache_format, mipChain: false, createUninitialized: false);
+                    m_brick_cache = new Texture3D(m_brick_cache_size.x, m_brick_cache_size.y, m_brick_cache_size.z,
+                        m_brick_cache_format, mipChain: false, createUninitialized: true);
                     // set texture wrapping to Clamp to remove edge/face artifacts
                     m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
                     m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
@@ -168,9 +237,9 @@ namespace UnityCTVisualizer {
             m_material.SetVector(
                 SHADER_BRICK_CACHE_TEX_SIZE_ID,
                 new Vector4(
-                    m_volume_dataset.BrickCacheSize.x,
-                    m_volume_dataset.BrickCacheSize.y,
-                    m_volume_dataset.BrickCacheSize.z,
+                    m_brick_cache_size.x,
+                    m_brick_cache_size.y,
+                    m_brick_cache_size.z,
                     0.0f
                 )
             );
@@ -191,24 +260,35 @@ namespace UnityCTVisualizer {
             // m_attached_mesh_renderer.sharedMaterial.SetBuffer(SHADER_BRICK_CACHE_MISSES_BUFFER, m_brick_cache_misses_buffer);
 
             // scale mesh to match correct dimensions of the original volumetric data
-            // m_transform.localScale = m_volume_dataset.Metadata.Scale;
-            // rotate mesh according to provided rotation
-            // m_transform.localRotation = Quaternion.Euler(m_volume_dataset.Metadata.EulerRotation);
+            m_transform.localScale = new Vector3(
+                m_volume_dataset.Metadata.VoxelDims.x * m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[0].x * MM_TO_METERS,
+                m_volume_dataset.Metadata.VoxelDims.y * m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[0].y * MM_TO_METERS,
+                m_volume_dataset.Metadata.VoxelDims.z * m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[0].z * MM_TO_METERS
+            );
+
+            // rotate the volume according to provided Euler angles
+            m_transform.localRotation = Quaternion.Euler(m_volume_dataset.Metadata.EulerRotation);
 
             m_progress_handler.Enabled = true;
-            Task t = Task.Run(() => {
-                switch (m_volume_dataset.Metadata.ColorDepth) {
-                    case ColorDepth.UINT8:
-                    m_volume_dataset.LoadAllBricksIntoCache(m_cache_uint8, m_brick_reply_queue, 0, m_progress_handler);
-                    break;
-                    case ColorDepth.UINT16:
-                    m_volume_dataset.LoadAllBricksIntoCache(m_cache_uint16, m_brick_reply_queue, 0, m_progress_handler);
-                    break;
-                    default:
-                    throw new NotImplementedException();
-                }
-            });
-            t.ContinueWith(t => { Debug.LogException(t.Exception); }, TaskContinuationOptions.OnlyOnFaulted);
+            if (m_rendering_mode == RenderingMode.IN_CORE) {
+                Task t = Task.Run(() => {
+                    switch (m_volume_dataset.Metadata.ColorDepth) {
+                        case ColorDepth.UINT8:
+                        Importer.LoadAllBricksIntoCache(m_volume_dataset.Metadata, m_brick_size, m_resolution_lvl,
+                            m_cache_uint8, m_brick_reply_queue, m_progress_handler);
+                        break;
+                        case ColorDepth.UINT16:
+                        Importer.LoadAllBricksIntoCache(m_volume_dataset.Metadata, m_brick_size, m_resolution_lvl,
+                            m_cache_uint16, m_brick_reply_queue, m_progress_handler);
+                        break;
+                        default:
+                        throw new NotImplementedException();
+                    }
+                });
+                t.ContinueWith(t => { Debug.LogException(t.Exception); }, TaskContinuationOptions.OnlyOnFaulted);
+            } else {
+                // TODO: add out-of-core rendering
+            }
         }
 
 
@@ -220,7 +300,11 @@ namespace UnityCTVisualizer {
 
             // start handling GPU requests (i.e., visualization-driven bricks loading) or to avoid corroutines cost
             // and assuming only one camera exists in the scene, register a callback to Camera.onPostRender
-            StartCoroutine(HandleGPURequests());
+            if (m_rendering_mode == RenderingMode.IN_CORE) {
+                StartCoroutine(LoadAllBricks());
+            } else {
+                // TODO
+            }
         }
 
         private void OnDisable() {
@@ -233,81 +317,117 @@ namespace UnityCTVisualizer {
                 m_transfer_function.TFColorsLookupTexChange -= OnTFColorsLookupTexChange;
             }
 
-            // don't forget to release the natively created texture
-            TextureSubPlugin.UpdateClearTexture3DParams(m_brick_cache_ptr);
-            GL.IssuePluginEvent(TextureSubPlugin.GetRenderEventFunc(), (int)TextureSubPlugin.Event.ClearTexture3D);
             StopAllCoroutines();
         }
 
-        public IEnumerator HandleGPURequests() {
+        /// <summary>
+        ///     In-core approach that loads all bricks into the 3D texture. Use this when the whole
+        ///     3D dataset can fit into a GPU's texture 3D
+        /// </summary>
+        /// 
+        /// <remark>
+        ///     Note that the limitations for this may depend on the graphics API used. For instance,
+        ///     for D3D11/12 you can't create a 3D texture larger than 2GBs
+        /// </remark>
+        /// 
+        /// <exception cref="NotImplementedException">
+        ///     thrown in case ColorDepth is neither UR8 nor UR16
+        /// </exception>
+        public IEnumerator LoadAllBricks() {
+
+            // make sure to only start when all dependencies are initialized
             yield return new WaitUntil(() => (m_volume_dataset != null) && (m_transfer_function != null) && (m_brick_cache != null));
-            Debug.Log("READY");
 
-            int brick_size = m_volume_dataset.BrickSize;
-            int nbr_bricks_loaded = 0;
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            Debug.Log("started handling GPU brick requests");
 
-            while (true) {
+            long nbr_bricks_uploaded = 0;
+            long total_nbr_bricks = m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x *
+                m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y *
+                m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z *
+                (int)Math.Pow(m_volume_dataset.Metadata.ChunkSize / m_brick_size, 3);
+            int nbr_bricks_uploaded_per_frame = 0;
+            CommandBuffer cmd_buffer = new();
+            GCHandle[] handles = new GCHandle[m_volume_dataset.MAX_BRICK_UPLOADS_PER_FRAME];
+
+            while (nbr_bricks_uploaded < total_nbr_bricks) {
+
                 // wait until current frame rendering is done ...
                 yield return new WaitForEndOfFrame();
 
-                // TODO: get brick requests from GPU in case of out-of-core rendering
+                // we can safely assume that bricks uploaded to GPU in previous frame are done
+                nbr_bricks_uploaded += nbr_bricks_uploaded_per_frame;
+
+                // notify GC that it is free to manage previous frame's bricks
+                for (int i = 0; i < nbr_bricks_uploaded_per_frame; ++i)
+                    handles[i].Free();
+                nbr_bricks_uploaded_per_frame = 0;
+                m_tex_params_pool.ReleaseAll();
 
                 // upload requested bricks to the GPU from the bricks reply queue
-                while (m_brick_reply_queue.TryDequeue(out UInt32 brick_id)) {
-                    GCHandle gc_data;
+                while (
+                    nbr_bricks_uploaded_per_frame < m_volume_dataset.MAX_BRICK_UPLOADS_PER_FRAME &&
+                    m_brick_reply_queue.TryDequeue(out UInt32 brick_id)
+                ) {
+
+                    // we are sending a managed object to unmanaged thread (i.e., C++) the object has to be pinned to a
+                    // fixed location in memory during the plugin call
                     switch (m_volume_dataset.Metadata.ColorDepth) {
                         case ColorDepth.UINT8: {
                             var brick = m_cache_uint8.Get(brick_id);
                             Assert.IsNotNull(brick);
-                            // we are sending a managed object to unmanaged thread (i.e., C++) the object has to be pinned to a
-                            // fixed location in memory during the plugin call
-                            gc_data = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
+                            handles[nbr_bricks_uploaded_per_frame] = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
                             break;
                         }
                         case ColorDepth.UINT16: {
                             var brick = m_cache_uint16.Get(brick_id);
                             Assert.IsNotNull(brick);
-                            gc_data = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
+                            handles[nbr_bricks_uploaded_per_frame] = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
                             break;
                         }
                         default:
                         throw new NotImplementedException();
                     }
 
-                    // TODO: maybe this is wrong for direct3D 11? Check row pitch (you are sending uint16_t and 
-                    // the plugin probably expects uint8_t)
+                    // compute where the brick offset within the brick cache
+                    m_volume_dataset.ComputeVolumeOffset(brick_id, m_brick_size, out Int32 x, out Int32 y, out Int32 z);
 
-                    // update global state
-                    m_volume_dataset.ComputeVolumeOffset(brick_id, out Int32 x, out Int32 y, out Int32 z);
+                    // allocate the plugin call's arguments struct
+                    TextureSubImage3DParams args = new() {
+                        texture_handle = m_brick_cache_ptr,
+                        xoffset = x,
+                        yoffset = y,
+                        zoffset = z,
+                        width = m_brick_size,
+                        height = m_brick_size,
+                        depth = m_brick_size,
+                        data_ptr = handles[nbr_bricks_uploaded_per_frame].AddrOfPinnedObject(),
+                        level = 0,
+                        format = m_tex_plugin_format
+                    };
+                    m_tex_params_pool.Acquire(args, out IntPtr arg_ptr);
+                    cmd_buffer.IssuePluginEventAndData(API.GetRenderEventFunc(), (int)TextureSubPlugin.Event.TextureSubImage3D,
+                        arg_ptr);
+
 #if DEBUG_VERBOSE_2
                     Debug.Log($"brick id: i={brick_id}; volume offset: x={x} y={y} z={z}");
 #endif
-                    TextureSubPlugin.UpdateTextureSubImage3DParams(m_brick_cache_ptr, x, y, z,
-                        brick_size, brick_size, brick_size, gc_data.AddrOfPinnedObject(), level: 0,
-                        format: m_tex_plugin_format);
-
-                    // actual texture loading should be called from the render thread
-                    GL.IssuePluginEvent(TextureSubPlugin.GetRenderEventFunc(),
-                        (int)TextureSubPlugin.Event.TextureSubImage3D);
-
-                    // wait for the end of frame again because the previous GL.IssuePluginEvent might not get
-                    // called immediately (even though the documentation states that it does!)
-                    // Since there are (probably) plenty of other threads adding cache entries, it is probable
-                    // that the GC will move the cache entries' data (large arrays) around in the heap. The GCHandle.Free()
-                    // call might happen too soon and we end up with uninitialized arrays sent to the native plugin
-                    // which explains the empty bricks we get.
-                    yield return new WaitForEndOfFrame();
 
 #if DEBUG_BRICK_WIREFRAMES
                     GameObject brick_wireframe = Instantiate(m_brick_wireframe, gameObject.transform, false);
                     brick_wireframe.transform.localPosition = new Vector3((float)x, (float)y, (float)z);
 #endif
-                    // GC, you are now again free to manage the object
-                    gc_data.Free();
-                    ++nbr_bricks_loaded;
-                }
+                    ++nbr_bricks_uploaded_per_frame;
 
-            }
+                }  // END WHILE
+
+                // we execute the command buffer instantly
+                Graphics.ExecuteCommandBuffer(cmd_buffer);
+                cmd_buffer.Clear();
+
+            }  // END WHILE
+
+            Debug.Log($"uploading all {total_nbr_bricks} bricks to GPU took: {stopwatch.Elapsed}s");
         }
 
         /*
@@ -322,30 +442,23 @@ namespace UnityCTVisualizer {
         }
 
         private void OnModelAlphaCutoffChange(float value) {
-            Debug.Log($"model: {value}");
             m_material.SetFloat(SHADER_ALPHA_CUTOFF_ID, value);
         }
 
         private void OnModelMaxIterationsChange(MaxIterations value) {
-            Debug.Log($"model: {value}");
             if (m_max_iterations_update != null) {
                 StopCoroutine(m_max_iterations_update);
                 m_max_iterations_update = null;
             }
-            int maxIters;
-            switch (value) {
-                case MaxIterations._128:
-                maxIters = 128;
-                break;
-                case MaxIterations._256:
-                maxIters = 256;
-                break;
-                case MaxIterations._512: maxIters = 512; break;
-                case MaxIterations._1024: maxIters = 1024; break;
-                case MaxIterations._2048: maxIters = 2048; break;
-                default:
-                throw new Exception(value.ToString());
-            }
+
+            var maxIters = value switch {
+                MaxIterations._128 => 128,
+                MaxIterations._256 => 256,
+                MaxIterations._512 => 512,
+                MaxIterations._1024 => 1024,
+                MaxIterations._2048 => 2048,
+                _ => throw new Exception(value.ToString()),
+            };
             // do NOT update immediately as the brick cache texture could not be available
             m_max_iterations_update = StartCoroutine(UpdateWhenBrickCacheReady(() => {
                 // Material.SetInteger() is busted ... do NOT use it
@@ -355,7 +468,6 @@ namespace UnityCTVisualizer {
         }
 
         private void OnModelTFChange(TF tf, ITransferFunction tf_so) {
-            Debug.Log($"model: {tf}");
             if (m_transfer_function != null)
                 m_transfer_function.TFColorsLookupTexChange -= OnTransferFunctionTexChange;
             m_transfer_function = tf_so;
@@ -364,7 +476,6 @@ namespace UnityCTVisualizer {
         }
 
         private void OnModelInterpolationChange(INTERPOLATION value) {
-            Debug.Log($"model: {value}");
             if (m_interpolation_method_update != null) {
                 StopCoroutine(m_interpolation_method_update);
                 m_interpolation_method_update = null;

@@ -57,7 +57,8 @@ namespace UnityCTVisualizer {
                     rotation: Quaternion.identity
                 )
                 .GetComponent<VolumetricObject>();
-            m_VolumetricObject.Init(volumetricDataset, m_ProgressHandlerUI);
+            m_VolumetricObject.Init(volumetricDataset, RenderingMode.IN_CORE, resolution_lvl: 0,
+                progressHandler: m_ProgressHandlerUI);
             m_VolumetricObject.enabled = true;
 
             m_MetadataUI.Init(volumetricDataset.Metadata);

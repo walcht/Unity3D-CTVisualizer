@@ -49,7 +49,7 @@ namespace UnityCTVisualizer {
                 VolumetricDataset volumetric_dataset;
                 try {
                     volumetric_dataset = ScriptableObject.CreateInstance<VolumetricDataset>();
-                    volumetric_dataset.DatasetPath = dir_path;
+                    volumetric_dataset.Init(dir_path);
                 } catch (FileLoadException e) {
                     Debug.LogException(e);
                     return;

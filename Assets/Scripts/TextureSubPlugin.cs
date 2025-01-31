@@ -1,48 +1,52 @@
 using System;
 using System.Runtime.InteropServices;
 
-public static class TextureSubPlugin {
-    public enum Event {
+namespace TextureSubPlugin {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TextureSubImage3DParams {
+        public IntPtr texture_handle;
+        public Int32 xoffset;
+        public Int32 yoffset;
+        public Int32 zoffset;
+        public Int32 width;
+        public Int32 height;
+        public Int32 depth;
+        public IntPtr data_ptr;
+        public Int32 level;
+        public Int32 format;
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct CreateTexture3DParams {
+        public UInt32 texture_id;
+        public UInt32 width;
+        public UInt32 height;
+        public UInt32 depth;
+        public Int32 format;
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ClearTexture3DParams {
+        public UInt32 texture_id;
+    };
+
+    public enum Event : Int32 {
         TextureSubImage2D = 0,
         TextureSubImage3D = 1,
         CreateTexture3D = 2,
         ClearTexture3D = 3
     };
-    public enum Format {
-        R8_UINT = 0,
-        R16_UINT = 1
+
+    public enum Format : Int32 {
+        UR8 = 0,
+        UR16 = 1
     }
-    [DllImport("TextureSubPlugin")]
-    public static extern IntPtr GetRenderEventFunc();
 
-    [DllImport("TextureSubPlugin")]
-    public static extern void UpdateTextureSubImage3DParams(
-        IntPtr texture_handle,
-        Int32 xoffset,
-        Int32 yoffset,
-        Int32 zoffset,
-        Int32 width,
-        Int32 height,
-        Int32 depth,
-        IntPtr data_ptr,
-        Int32 level,
-        Int32 format
-    );
+    public static class API {
+        [DllImport("TextureSubPlugin")]
+        public static extern IntPtr GetRenderEventFunc();
 
-    [DllImport("TextureSubPlugin")]
-    public static extern void UpdateCreateTexture3DParams(
-       UInt32 width,
-       UInt32 height,
-       UInt32 depth,
-       Int32 format
-    );
-
-    [DllImport("TextureSubPlugin")]
-    public static extern void UpdateClearTexture3DParams(
-        IntPtr texture_handle
-    );
-
-    [DllImport("TextureSubPlugin")]
-    public static extern IntPtr RetrieveCreatedTexture3D();
-
-};
+        [DllImport("TextureSubPlugin")]
+        public static extern IntPtr RetrieveCreatedTexture3D(UInt32 texture_id);
+    };
+}

@@ -94,3 +94,6 @@ Assets/XRI
 venv/
 
 output/
+
+# ignore compile plugins
+Assets/Plugins/*

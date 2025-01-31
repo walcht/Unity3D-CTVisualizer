@@ -1,10 +1,7 @@
-﻿// #define IN_CORE
+﻿#define IN_CORE
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.Threading.Tasks;
 using UnityEngine;
 
 namespace UnityCTVisualizer {
@@ -35,6 +32,7 @@ namespace UnityCTVisualizer {
         public readonly long MAX_CACHE_USAGE_REPORTING_SIZE = 1024; // == 32768 / 32 of uint32 => 512 KB
         public readonly int BRICK_CACHE_MISSES_WINDOW = 128 * 128;
         public readonly int MEMORY_CACHE_MB = 4096;
+        public readonly int MAX_BRICK_UPLOADS_PER_FRAME = 10;
         public float BRICK_CACHE_SIZE_MB;
 
         /////////////////////////////////
@@ -86,32 +84,16 @@ namespace UnityCTVisualizer {
         /////////////////////////////////
         // PARAMETERS
         /////////////////////////////////
-        private readonly int m_BrickSize = 128;
-        public int BrickSize { get => m_BrickSize; }
-
-        private Vector3Int m_brick_cache_size;
-        public Vector3Int BrickCacheSize { get => m_brick_cache_size; }
-
         private CVDSMetadata m_metadata;
         public CVDSMetadata Metadata { get => m_metadata; }
 
         [SerializeField]
         private string m_dataset_path;
-        public string DatasetPath {
-            get => m_dataset_path;
-            set {
-                m_dataset_path = value;
-                m_metadata = Importer.ImportMetadata(m_dataset_path);
-                m_brick_cache_size = new Vector3Int(
-                    m_metadata.NbrChunksPerResolutionLvl[0].x * m_metadata.ChunkSize,
-                    m_metadata.NbrChunksPerResolutionLvl[0].y * m_metadata.ChunkSize,
-                    m_metadata.NbrChunksPerResolutionLvl[0].z * m_metadata.ChunkSize
-                );
-                BRICK_CACHE_SIZE_MB = (m_brick_cache_size.x / 1024.0f) * (m_brick_cache_size.y / 1024.0f) * m_brick_cache_size.z *
-                    (m_metadata.ColorDepth == ColorDepth.UINT16 ? 2.0f : 1.0f);
-                UnityEngine.Debug.Log($"brick cache size [x, y, z]: {m_brick_cache_size}");
-                UnityEngine.Debug.Log($"brick cache size [MB]: {BRICK_CACHE_SIZE_MB}");
-            }
+        public string DatasetPath { get => m_dataset_path; }
+
+        public void Init(string dataset_path) {
+            m_dataset_path = dataset_path;
+            m_metadata = Importer.ImportMetadata(m_dataset_path);
         }
 
         /*
@@ -148,15 +130,15 @@ namespace UnityCTVisualizer {
         *   next brick slice along the Z axis direction.
         *
         */
-        public void ComputeVolumeOffset(UInt32 brick_id, out Int32 x, out Int32 y, out Int32 z) {
+        public void ComputeVolumeOffset(UInt32 brick_id, int brick_size, out Int32 x, out Int32 y, out Int32 z) {
             int id = (int)(brick_id & 0x03FFFFFF);
             int resolution_lvl = (int)(brick_id >> 26);
             // transition to Unity's Texture3D coordinate system
-            int nbr_bricks_x = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x * m_metadata.ChunkSize / m_BrickSize;
-            int nbr_bricks_y = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y * m_metadata.ChunkSize / m_BrickSize;
-            x = m_BrickSize * (id % nbr_bricks_x);
-            y = m_BrickSize * ((id / nbr_bricks_x) % nbr_bricks_y);
-            z = m_BrickSize * (id / (nbr_bricks_x * nbr_bricks_y));
+            int nbr_bricks_x = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x * m_metadata.ChunkSize / brick_size;
+            int nbr_bricks_y = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y * m_metadata.ChunkSize / brick_size;
+            x = brick_size * (id % nbr_bricks_x);
+            y = brick_size * ((id / nbr_bricks_x) % nbr_bricks_y);
+            z = brick_size * (id / (nbr_bricks_x * nbr_bricks_y));
         }
 
         /// <summary>
@@ -176,133 +158,6 @@ namespace UnityCTVisualizer {
         ///     
         /// </remarks>
         public void LoadBrick(Vector3Int brick_cache_offset, byte[] brick_data) { }
-
-        public void LoadAllBricksIntoCache(MemoryCache<UInt16> cache, ConcurrentQueue<UInt32> brick_reply_queue,
-            int resolution_lvl, IProgressHandler progressHandler = null) {
-            if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"loading {m_metadata.TotalNbrBricks} bricks";
-            }
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            long total_nbr_bricks = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
-                (int)Math.Pow(m_metadata.ChunkSize / m_BrickSize, 3);
-            Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
-                TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(Environment.ProcessorCount - 2)
-            }, i => {
-                // load a chunk of a CVDS test dataset
-                UInt32 brick_id = (UInt32)i | (UInt32)resolution_lvl << 26;
-                Importer.ImportBrick(m_metadata, brick_id, m_BrickSize, cache);
-                brick_reply_queue.Enqueue(brick_id);
-                if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
-                }
-            });
-            stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to cache took: {stopwatch.Elapsed}s");
-        }
-
-        public void LoadAllBricksIntoCache(MemoryCache<byte> cache, ConcurrentQueue<UInt32> brick_reply_queue,
-            int resolution_lvl, IProgressHandler progressHandler = null) {
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            long total_nbr_bricks = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
-                (int)Math.Pow(m_metadata.ChunkSize / m_BrickSize, 3);
-            if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"uploading {total_nbr_bricks} bricks to CPU memory cache";
-            }
-            UnityEngine.Debug.Log($"uploading {total_nbr_bricks} bricks to CPU memory cache ...");
-            Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
-                TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(1)
-            }, i => {
-                UInt32 brick_id = (UInt32)i | (UInt32)resolution_lvl << 26;
-                Importer.ImportBrick(m_metadata, brick_id, m_BrickSize, cache);
-                brick_reply_queue.Enqueue(brick_id);
-                if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
-                }
-            });
-            stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to CPU memory cache took: {stopwatch.Elapsed}s");
-        }
-
-        public void LoadHomogeniousBricksIntoCache(MemoryCache<byte> cache, ConcurrentQueue<UInt32> brick_reply_queue,
-            int resolution_lvl, IProgressHandler progressHandler = null) {
-            if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"loading {m_metadata.TotalNbrBricks} bricks";
-            }
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            long total_nbr_bricks = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
-                (int)Math.Pow(m_metadata.ChunkSize / m_BrickSize, 3);
-            Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
-                TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(1)
-            }, i => {
-                UInt32 brick_id = (UInt32)i | (UInt32)resolution_lvl << 26;
-                Importer.GenerateHomogeneousBrick<byte>(brick_id, m_BrickSize, byte.MaxValue, cache);
-                brick_reply_queue.Enqueue(brick_id);
-                if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
-                }
-            });
-            stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to cache took: {stopwatch.Elapsed}s");
-        }
-
-        public void Foo(MemoryCache<byte> cache, ConcurrentQueue<UInt32> brick_reply_queue,
-            int resolution_lvl, IProgressHandler progressHandler = null) {
-            if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"loading {m_metadata.TotalNbrBricks} bricks";
-            }
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            long total_nbr_bricks = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
-                (int)Math.Pow(m_metadata.ChunkSize / m_BrickSize, 3);
-            Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
-                TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(1)
-            }, i => {
-                UInt32 brick_id = (UInt32)i | (UInt32)resolution_lvl << 26;
-                Importer.GenerateGradientBrick(brick_id, m_BrickSize, byte.MaxValue, byte.MinValue, cache);
-                brick_reply_queue.Enqueue(brick_id);
-                if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
-                }
-            });
-            stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to cache took: {stopwatch.Elapsed}s");
-        }
-
-        public void LoadHomogeniousBricksIntoCache(MemoryCache<UInt16> cache, ConcurrentQueue<UInt32> brick_reply_queue,
-            int resolution_lvl, IProgressHandler progressHandler = null) {
-            if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"loading {m_metadata.TotalNbrBricks} bricks";
-            }
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            long total_nbr_bricks = m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].x *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].y *
-                m_metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
-                (int)Math.Pow(m_metadata.ChunkSize / m_BrickSize, 3);
-            Parallel.For(0, 16, new ParallelOptions() {
-                TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(1)
-            }, i => {
-                UInt32 brick_id = (UInt32)i | (UInt32)resolution_lvl << 26;
-                Importer.GenerateHomogeneousBrick<UInt16>(brick_id, m_BrickSize, UInt16.MaxValue, cache);
-                brick_reply_queue.Enqueue(brick_id);
-                if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
-                }
-            });
-            stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to cache took: {stopwatch.Elapsed}s");
-        }
 
         private void OnEnable() {
             if (m_TransferFunctions == null) {
