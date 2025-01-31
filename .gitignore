@@ -97,3 +97,4 @@ output/
 
 # ignore compile plugins
 Assets/Plugins/*
+!Assets/Plugins/.gitkeep
