@@ -1,11 +1,7 @@
-// #define DEBUG_BRICK_WIREFRAMES
-
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Runtime.Serialization.Json;
 using System.Threading.Tasks;
 using TextureSubPlugin;
 using UnityEngine;
@@ -74,9 +70,9 @@ namespace UnityCTVisualizer {
         /////////////////////////////////
         // DEBUGGING
         /////////////////////////////////
-#if DEBUG_BRICK_WIREFRAMES
-        public GameObject m_brick_wireframe;
-#endif
+        [SerializeField] private GameObject m_brick_wireframe;
+        private Mesh m_wireframe_cube_mesh;
+        public bool InstantiateBrickWireframes;
 
         private Transform m_transform;
         private Material m_material;
@@ -136,6 +132,9 @@ namespace UnityCTVisualizer {
 
             // initialize object pools
             m_tex_params_pool = new(volumetricDataset.MAX_BRICK_UPLOADS_PER_FRAME);
+
+            // debugging stuff ...
+            m_wireframe_cube_mesh = WireframeCubeMesh.GenerateMesh();
 
             StartCoroutine(InternalInit());
         }
@@ -341,14 +340,20 @@ namespace UnityCTVisualizer {
             System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
             Debug.Log("started handling GPU brick requests");
 
+            CVDSMetadata metadata = m_volume_dataset.Metadata;
             long nbr_bricks_uploaded = 0;
-            long total_nbr_bricks = m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x *
-                m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y *
-                m_volume_dataset.Metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z *
-                (int)Math.Pow(m_volume_dataset.Metadata.ChunkSize / m_brick_size, 3);
+            long total_nbr_bricks = metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x *
+                metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y *
+                metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z *
+                (int)Math.Pow(metadata.ChunkSize / m_brick_size, 3);
             int nbr_bricks_uploaded_per_frame = 0;
             CommandBuffer cmd_buffer = new();
             GCHandle[] handles = new GCHandle[m_volume_dataset.MAX_BRICK_UPLOADS_PER_FRAME];
+            Vector3 brick_scale = new(
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x * metadata.ChunkSize),
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y * metadata.ChunkSize),
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z * metadata.ChunkSize)
+            );
 
             while (nbr_bricks_uploaded < total_nbr_bricks) {
 
@@ -372,7 +377,7 @@ namespace UnityCTVisualizer {
 
                     // we are sending a managed object to unmanaged thread (i.e., C++) the object has to be pinned to a
                     // fixed location in memory during the plugin call
-                    switch (m_volume_dataset.Metadata.ColorDepth) {
+                    switch (metadata.ColorDepth) {
                         case ColorDepth.UINT8: {
                             var brick = m_cache_uint8.Get(brick_id);
                             Assert.IsNotNull(brick);
@@ -413,10 +418,17 @@ namespace UnityCTVisualizer {
                     Debug.Log($"brick id: i={brick_id}; volume offset: x={x} y={y} z={z}");
 #endif
 
-#if DEBUG_BRICK_WIREFRAMES
-                    GameObject brick_wireframe = Instantiate(m_brick_wireframe, gameObject.transform, false);
-                    brick_wireframe.transform.localPosition = new Vector3((float)x, (float)y, (float)z);
-#endif
+                    if (InstantiateBrickWireframes) {
+                        GameObject brick_wireframe = Instantiate(m_brick_wireframe, gameObject.transform, false);
+                        brick_wireframe.GetComponent<MeshFilter>().sharedMesh = m_wireframe_cube_mesh;
+                        brick_wireframe.transform.localPosition = new Vector3(
+                            (x / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x * metadata.ChunkSize) - 0.5f) + brick_scale.x / 2.0f,
+                            (y / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y * metadata.ChunkSize) - 0.5f) + brick_scale.y / 2.0f,
+                            (z / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z * metadata.ChunkSize) - 0.5f) + brick_scale.z / 2.0f
+                        );
+                        brick_wireframe.transform.localScale = brick_scale;
+                        brick_wireframe.name = $"brick_{brick_id & 0x03FFFFFF}_res_lvl_{brick_id >> 26}";
+                    }
                     ++nbr_bricks_uploaded_per_frame;
 
                 }  // END WHILE
