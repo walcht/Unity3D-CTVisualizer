@@ -39,7 +39,6 @@ namespace UnityCTVisualizer {
             switch (new_tf) {
                 case TF.TF1D:
                 // disable other TFUIs here
-                Debug.Log($"OnModelTFChange{new_tf}");
                 m_TransferFunction1DUI.Init((TransferFunction1D)tf_so);
                 m_TransferFunction1DUI.gameObject.SetActive(true);
                 break;

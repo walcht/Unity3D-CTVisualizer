@@ -72,7 +72,8 @@ namespace UnityCTVisualizer {
         /////////////////////////////////
         [SerializeField] private GameObject m_brick_wireframe;
         private Mesh m_wireframe_cube_mesh;
-        public bool InstantiateBrickWireframes;
+        public bool InstantiateBrickWireframes = false;
+        public bool ForceNativeTextureCreation = true;
 
         private Transform m_transform;
         private Material m_material;
@@ -139,6 +140,52 @@ namespace UnityCTVisualizer {
             StartCoroutine(InternalInit());
         }
 
+        private void CreateTexture3D() {
+            m_brick_cache = new Texture3D(m_brick_cache_size.x, m_brick_cache_size.y, m_brick_cache_size.z,
+                m_brick_cache_format, mipChain: false, createUninitialized: true);
+            // set texture wrapping to Clamp to remove edge/face artifacts
+            m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
+            m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
+            m_brick_cache.wrapModeW = TextureWrapMode.Clamp;
+            m_brick_cache_ptr = m_brick_cache.GetNativeTexturePtr();
+            Assert.AreNotEqual(m_brick_cache_ptr, IntPtr.Zero);
+        }
+
+        private IEnumerator CreateNativeTexture3D() {
+            // make sure that you do not create a resource during a render pass
+            yield return new WaitForEndOfFrame();
+
+            CommandBuffer cmd_buffer = new();
+            UInt32 texture_id = 0;
+            CreateTexture3DParams args = new() {
+                texture_id = texture_id,
+                width = (UInt32)m_brick_cache_size.x,
+                height = (UInt32)m_brick_cache_size.y,
+                depth = (UInt32)m_brick_cache_size.z,
+                format = m_tex_plugin_format,
+            };
+            IntPtr args_ptr = Marshal.AllocHGlobal(Marshal.SizeOf<CreateTexture3DParams>());
+            Marshal.StructureToPtr(args, args_ptr, false);
+            cmd_buffer.IssuePluginEventAndData(API.GetRenderEventFunc(), (int)TextureSubPlugin.Event.CreateTexture3D,
+                args_ptr);
+            Graphics.ExecuteCommandBuffer(cmd_buffer);
+            yield return new WaitForEndOfFrame();
+            Marshal.FreeHGlobal(args_ptr);
+
+            m_brick_cache_ptr = API.RetrieveCreatedTexture3D(texture_id);
+            if (m_brick_cache_ptr == IntPtr.Zero) {
+                throw new NullReferenceException("native bricks cache pointer is nullptr " +
+                    "make sure that your platform supports native code plugins");
+            }
+            m_brick_cache = Texture3D.CreateExternalTexture(m_brick_cache_size.x, m_brick_cache_size.y,
+                m_brick_cache_size.z, m_brick_cache_format, mipChain: false, nativeTex: m_brick_cache_ptr);
+            // this has to be overwritten for Vulkan to work because Unity expects a VkImage* for the nativeTex
+            // paramerter not a VkImage. GetNativeTexturePtr does not actually return a VkImage* as it claims
+            // but rather a VkImage => This is probably a bug.
+            // (see https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Texture3D.CreateExternalTexture.html)
+            m_brick_cache_ptr = m_brick_cache.GetNativeTexturePtr();
+        }
+
         private IEnumerator InternalInit() {
             yield return new WaitUntil(() => (m_volume_dataset != null) && (m_transfer_function != null));
 
@@ -168,80 +215,33 @@ namespace UnityCTVisualizer {
             //
             // Important: if the texture is created using Unity's Texture3D with createUninitialized set to true
             // and you try to visualize some uninitailized blocks you might observe some artifacts (duh?!)
-            switch (SystemInfo.graphicsDeviceType) {
-                case GraphicsDeviceType.Direct3D11:
-                case GraphicsDeviceType.Direct3D12: {
-                    if (m_volume_dataset.BRICK_CACHE_SIZE_MB > 2048) {
-                        throw new NotImplementedException("multiple 3D texture brick caches are not yet implemented. "
-                            + "Choose a smaller than 2GB brick cache or use a different graphics API (e.g., Vulkan/OpenGLCore)");
-                    }
-                    Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
-                        + "Using Unity's API to create the 3D texture");
-                    m_brick_cache = new Texture3D(m_brick_cache_size.x, m_brick_cache_size.y, m_brick_cache_size.z,
-                        m_brick_cache_format, mipChain: false, createUninitialized: true);
-                    // set texture wrapping to Clamp to remove edge/face artifacts
-                    m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
-                    m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
-                    m_brick_cache.wrapModeW = TextureWrapMode.Clamp;
-                    m_brick_cache_ptr = m_brick_cache.GetNativeTexturePtr();
-                    Assert.AreNotEqual(m_brick_cache_ptr, IntPtr.Zero);
-                    break;
+            if (ForceNativeTextureCreation) {
+                Debug.Log("forcing native 3D texture creation");
+                yield return CreateNativeTexture3D();
+            } else if (m_volume_dataset.BRICK_CACHE_SIZE_MB <= 2048) {
+                Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
+                    + " Using Unity's API to create the 3D texture");
+                CreateTexture3D();
+            } else {
+                if (SystemInfo.graphicsDeviceType != GraphicsDeviceType.Vulkan &&
+                    SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLCore &&
+                    SystemInfo.graphicsDeviceType != GraphicsDeviceType.OpenGLES3) {
+                    throw new NotImplementedException("multiple 3D texture brick caches are not yet implemented."
+                        + " Choose a smaller than 2GB brick cache or use a different graphics API (e.g., Vulkan/OpenGLCore)");
                 }
-                case GraphicsDeviceType.OpenGLCore:
-                case GraphicsDeviceType.Vulkan: {
-                    if (m_volume_dataset.BRICK_CACHE_SIZE_MB > 2048) {
-                        Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is larger than 2GB. "
-                            + "Using native plugin to create the brick cache 3D texture");
-                        CommandBuffer cmd_buffer = new();
-                        UInt32 texture_id = 0;
-                        CreateTexture3DParams args = new() {
-                            texture_id = texture_id,
-                            width = (UInt32)m_brick_cache_size.x,
-                            height = (UInt32)m_brick_cache_size.y,
-                            depth = (UInt32)m_brick_cache_size.z,
-                            format = m_tex_plugin_format,
-                        };
-                        IntPtr args_ptr = Marshal.AllocHGlobal(Marshal.SizeOf<CreateTexture3DParams>());
-                        Marshal.StructureToPtr(args, args_ptr, false);
-                        cmd_buffer.IssuePluginEventAndData(API.GetRenderEventFunc(), (int)TextureSubPlugin.Event.CreateTexture3D,
-                            args_ptr);
-                        Graphics.ExecuteCommandBuffer(cmd_buffer);
-                        yield return new WaitForEndOfFrame();
-                        Marshal.FreeHGlobal(args_ptr);
-
-                        m_brick_cache_ptr = API.RetrieveCreatedTexture3D(texture_id);
-                        if (m_brick_cache_ptr == IntPtr.Zero) {
-                            throw new NullReferenceException("native bricks cache pointer is nullptr " +
-                                "make sure that your platform supports native code plugins");
-                        }
-                        m_brick_cache = Texture3D.CreateExternalTexture(m_brick_cache_size.x, m_brick_cache_size.y,
-                            m_brick_cache_size.z, m_brick_cache_format, mipChain: false, nativeTex: m_brick_cache_ptr);
-                        break;
-                    }
-                    Debug.Log($"requested brick cache size{m_volume_dataset.BRICK_CACHE_SIZE_MB}MB is less than 2GB."
-                        + "Using Unity's API to create the 3D texture");
-                    m_brick_cache = new Texture3D(m_brick_cache_size.x, m_brick_cache_size.y, m_brick_cache_size.z,
-                        m_brick_cache_format, mipChain: false, createUninitialized: true);
-                    // set texture wrapping to Clamp to remove edge/face artifacts
-                    m_brick_cache.wrapModeU = TextureWrapMode.Clamp;
-                    m_brick_cache.wrapModeV = TextureWrapMode.Clamp;
-                    m_brick_cache.wrapModeW = TextureWrapMode.Clamp;
-                    m_brick_cache_ptr = m_brick_cache.GetNativeTexturePtr();
-                    Assert.AreNotEqual(m_brick_cache_ptr, IntPtr.Zero);
-                    break;
-                }
+                yield return CreateNativeTexture3D();
             }
 
             // set shader attributes
             m_material.SetVector(
                 SHADER_BRICK_CACHE_TEX_SIZE_ID,
-                new Vector4(
-                    m_brick_cache_size.x,
-                    m_brick_cache_size.y,
-                    m_brick_cache_size.z,
-                    0.0f
-                )
-            );
+                    new Vector4(
+                        m_brick_cache_size.x,
+                        m_brick_cache_size.y,
+                        m_brick_cache_size.z,
+                        0.0f
+                    )
+                );
             m_material.SetTexture(
                 SHADER_BRICK_CACHE_TEX_ID,
                 m_brick_cache

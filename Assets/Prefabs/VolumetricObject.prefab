@@ -92,13 +92,14 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 6524694346905046297}
-  m_Enabled: 0
+  m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a77a710b3c0443afbbb7a95178b9ff2b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   m_brick_wireframe: {fileID: 4892012301941521694, guid: 849307a6568aa3540950412a75d20762, type: 3}
-  InstantiateBrickWireframes: 1
+  InstantiateBrickWireframes: 0
+  ForceNativeTextureCreation: 0
 --- !u!114 &6678064435525622475
 MonoBehaviour:
   m_ObjectHideFlags: 0

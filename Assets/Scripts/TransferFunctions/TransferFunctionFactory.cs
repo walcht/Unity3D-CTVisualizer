@@ -4,7 +4,6 @@ using UnityEngine;
 
 public static class TransferFunctionFactory {
     public static ITransferFunction Create(TF tf) {
-        Debug.Log($"TF created: {tf}");
         switch (tf) {
             case TF.TF1D:
             var tf_so = ScriptableObject.CreateInstance<TransferFunction1D>();

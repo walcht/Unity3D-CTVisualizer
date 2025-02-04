@@ -2,6 +2,19 @@ using System;
 using System.Runtime.InteropServices;
 
 namespace TextureSubPlugin {
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TextureSubImage2DParams {
+        public IntPtr texture_handle;
+        public Int32 xoffset;
+        public Int32 yoffset;
+        public Int32 width;
+        public Int32 height;
+        public IntPtr data_ptr;
+        public Int32 level;
+        public Int32 format;
+    };
+
     [StructLayout(LayoutKind.Sequential)]
     public struct TextureSubImage3DParams {
         public IntPtr texture_handle;
@@ -17,7 +30,7 @@ namespace TextureSubPlugin {
     };
 
     [StructLayout(LayoutKind.Sequential)]
-    struct CreateTexture3DParams {
+    public struct CreateTexture3DParams {
         public UInt32 texture_id;
         public UInt32 width;
         public UInt32 height;
@@ -26,7 +39,7 @@ namespace TextureSubPlugin {
     };
 
     [StructLayout(LayoutKind.Sequential)]
-    struct ClearTexture3DParams {
+    public struct DestroyTexture3DParams {
         public UInt32 texture_id;
     };
 
@@ -34,7 +47,7 @@ namespace TextureSubPlugin {
         TextureSubImage2D = 0,
         TextureSubImage3D = 1,
         CreateTexture3D = 2,
-        ClearTexture3D = 3
+        DestroyTexture3D = 3
     };
 
     public enum Format : Int32 {

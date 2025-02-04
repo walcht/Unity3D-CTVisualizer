@@ -103,26 +103,22 @@ namespace UnityCTVisualizer {
         /////////////////////////////////
 
         private void OnModelTFChange(TF new_tf, ITransferFunction _) {
-            Debug.Log($"UI: {new_tf}");
             // do NOT set using value otherwise infinite event callbacks will occur!
             m_TFDropDown.SetValueWithoutNotify((int)new_tf);
         }
 
 
         private void OnModelAlphaCutoffChange(float value) {
-            Debug.Log($"UI: {value}");
             // do NOT set using value otherwise infinite event callbacks will occur!
             m_AlphaCutoffSlider.SetValueWithoutNotify(value);
         }
 
         private void OnModelMaxIterationsChange(MaxIterations value) {
-            Debug.Log($"UI: {value}");
             // do NOT set using value otherwise infinite event callbacks will occur!
             m_MaxIterationsDropDown.SetValueWithoutNotify((int)value);
         }
 
         private void OnModelInterpolationChange(INTERPOLATION value) {
-            Debug.Log($"UI: {value}");
             // do NOT set using value otherwise infinite event callbacks will occur!
             m_InterpolationDropDown.SetValueWithoutNotify((int)value);
         }
