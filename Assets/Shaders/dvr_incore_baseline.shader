@@ -135,13 +135,22 @@ Shader "UnityCTVisualizer/dvr_incore_baseline"
                 flipped_ray.dir = -ray.dir;
                 flipped_ray.t_out = ray.t_out;
                 return flipped_ray;
-            }
+            } 
+             
+            struct appdata {
+                float4 modelVertex: POSITION;
+                float2 uv: TEXCOORD0;
+                // enable single-pass instanced rendering
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
             
             struct v2f
             {
                 float4 clipVertex : SV_POSITION;
                 float2 uv: TEXCOORD0;
                 float3 modelVertex : TEXCOORD1;
+                // stereo-rendering related
+                UNITY_VERTEX_OUTPUT_STEREO 
             };
             
             /// <summary>
@@ -149,12 +158,18 @@ Shader "UnityCTVisualizer/dvr_incore_baseline"
             ///     case this should get called at least 8 times because the volume is
             ///     being drawn inside a Cube mesh.
             /// </summary>
-            v2f vert(float4 modelVertex: POSITION, float2 uv: TEXCOORD0)
+            v2f vert(appdata v)
             {
                 v2f output;
-                output.clipVertex = UnityObjectToClipPos(modelVertex);
-                output.uv = uv;
-                output.modelVertex = modelVertex.xyz;
+
+                // stereo-rendering related
+                UNITY_SETUP_INSTANCE_ID(v);
+                UNITY_INITIALIZE_OUTPUT(v2f, output);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+                output.clipVertex = UnityObjectToClipPos(v.modelVertex);
+                output.uv = v.uv;
+                output.modelVertex = v.modelVertex.xyz;
                 return output;
             }
             
