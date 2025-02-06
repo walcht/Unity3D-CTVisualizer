@@ -40,7 +40,7 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaCutoff: 0.99607843
-    - _MaxIterations: 1024
+    - _MaxIterations: 2048
     m_Colors:
     - _BrickCacheTexSize: {r: 1152, g: 768, b: 1920, a: 0}
     - _DensitiesTexSize: {r: 512, g: 512, b: 62, a: 0}
