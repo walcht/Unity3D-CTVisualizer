@@ -1,64 +1,66 @@
+using System.Collections;
+using System.Threading;
 using TMPro;
 using UnityEngine;
 
 namespace UnityCTVisualizer {
     public interface IProgressHandler {
         /// <summary>
-        ///     Progress from 0.00 to 1.00. Read and update operataions are thread-safe.
+        ///     Progress from 0 to MaxProgressValue. Read and update operataions are thread-safe.
         /// </summary>
-        float Progress { get; set; }
+        void IncrementProgress();
+        int MaxProgressValue { get; set; }
         string Message { set; }
 
-        bool Enabled { set; }
+        /// <summary>
+        ///     Enable the attached GameObject. Should only be called from main thread!
+        /// </summary>
+        void Enable();
     }
 
     public class ProgressHandler : MonoBehaviour, IProgressHandler {
-        private readonly object m_progress_lock = new();
-        private readonly object m_message_lock = new();
-        private readonly object m_enabled_lock = new();
+        private int m_progress;
+        private string m_progress_txt;
+        private bool m_txt_dirty = false;
+        private bool m_progress_dirty = false;
+        private int m_max_progress_value;
 
         [SerializeField] TMP_Text m_TextMessage;
         [SerializeField] TMP_Text m_PercentageText;
         [SerializeField] RectTransform m_ProgressBar;
-        [SerializeField] float m_Progress;
 
         void OnEnable() {
             m_ProgressBar.anchorMax = new Vector2(0.0f, 1.0f);
             m_PercentageText.text = "0 %";
         }
 
-        public float Progress {
-            get {
-                lock (m_progress_lock) {
-                    return m_Progress;
-                }
-            }
-            set {
-                lock (m_progress_lock) {
-                    m_Progress = Mathf.Clamp01(value);
-                }
-            }
+        public void IncrementProgress() {
+            Interlocked.Increment(ref m_progress);
+            m_progress_dirty = true;
         }
 
-        public string Message {
-            set {
-                lock (m_message_lock) {
-                    m_TextMessage.text = value;
-                }
-            }
+        public string Message { set { m_progress_txt = value; m_txt_dirty = true; } }
+
+        public int MaxProgressValue {
+            get => m_max_progress_value;
+            set => m_max_progress_value = value;
         }
 
-        public bool Enabled {
-            set {
-                lock (m_enabled_lock) {
-                    gameObject.SetActive(value);
-                }
-            }
+        public void Enable() {
+            gameObject.SetActive(true);
         }
 
-        private void Update() {
-            m_ProgressBar.anchorMax = new Vector2(m_Progress, 1.0f);
-            m_PercentageText.text = $"{Mathf.FloorToInt(m_Progress * 100.0f)} %";
+        void Update() {
+            if (m_progress_dirty) {
+                float p = Mathf.Clamp01(m_progress / (float)m_max_progress_value);
+                m_ProgressBar.anchorMax = new Vector2(p, 1.0f);
+                m_PercentageText.text = $"{Mathf.FloorToInt(p * 100.0f)} %";
+                m_progress_dirty = false;
+            }
+            if (m_txt_dirty) {
+                m_TextMessage.text = m_progress_txt;
+                m_txt_dirty = false;
+            }
         }
     }
 }

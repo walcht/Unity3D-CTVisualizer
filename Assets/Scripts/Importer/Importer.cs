@@ -273,10 +273,10 @@ namespace UnityCTVisualizer {
                 metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
                 (int)Math.Pow(metadata.ChunkSize / brick_size, 3);
             if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"uploading {total_nbr_bricks} bricks to CPU memory cache";
+                progressHandler.MaxProgressValue = (int)total_nbr_bricks;
+                progressHandler.Message = $"uploading {total_nbr_bricks} bricks to host memory cache ...";
             }
-            UnityEngine.Debug.Log($"uploading {total_nbr_bricks} bricks to CPU memory cache ...");
+            UnityEngine.Debug.Log($"uploading {total_nbr_bricks} bricks to host memory cache ...");
             Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
                 TaskScheduler = new LimitedConcurrencyLevelTaskScheduler(Environment.ProcessorCount - 2)
             }, i => {
@@ -284,11 +284,14 @@ namespace UnityCTVisualizer {
                 ImportBrick(metadata, brick_id, brick_size, cache);
                 brick_reply_queue.Enqueue(brick_id);
                 if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
+                    progressHandler.IncrementProgress();
                 }
             });
             stopwatch.Stop();
-            UnityEngine.Debug.Log($"uploading to CPU memory cache took: {stopwatch.Elapsed}s");
+            if (progressHandler != null) {
+                progressHandler.Message = $"all {total_nbr_bricks} bricks uploaded in {stopwatch.Elapsed.TotalSeconds:0.00}s";
+            }
+            UnityEngine.Debug.Log($"uploading to host memory cache took: {stopwatch.Elapsed}s");
         }
 
         public static void LoadAllBricksIntoCache(CVDSMetadata metadata, int brick_size, int resolution_lvl,
@@ -300,8 +303,8 @@ namespace UnityCTVisualizer {
                 metadata.NbrChunksPerResolutionLvl[resolution_lvl].z *
                 (int)Math.Pow(metadata.ChunkSize / brick_size, 3);
             if (progressHandler != null) {
-                progressHandler.Progress = 0;
-                // progressHandler.Message = $"uploading {total_nbr_bricks} bricks to CPU memory cache";
+                progressHandler.MaxProgressValue = (int)total_nbr_bricks;
+                progressHandler.Message = $"uploading {total_nbr_bricks} bricks to host memory cache ...";
             }
             UnityEngine.Debug.Log($"uploading {total_nbr_bricks} bricks to CPU memory cache ...");
             Parallel.For(0, total_nbr_bricks, new ParallelOptions() {
@@ -311,10 +314,13 @@ namespace UnityCTVisualizer {
                 ImportBrick(metadata, brick_id, brick_size, cache);
                 brick_reply_queue.Enqueue(brick_id);
                 if (progressHandler != null) {
-                    progressHandler.Progress += 1.0f / total_nbr_bricks;
+                    progressHandler.IncrementProgress();
                 }
             });
             stopwatch.Stop();
+            if (progressHandler != null) {
+                progressHandler.Message = $"all {total_nbr_bricks} bricks uploaded in {stopwatch.Elapsed.TotalSeconds:0.00}s";
+            }
             UnityEngine.Debug.Log($"uploading to CPU memory cache took: {stopwatch.Elapsed}s");
         }
 

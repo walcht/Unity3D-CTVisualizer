@@ -268,7 +268,7 @@ namespace UnityCTVisualizer {
             // rotate the volume according to provided Euler angles
             m_transform.localRotation = Quaternion.Euler(m_volume_dataset.Metadata.EulerRotation);
 
-            m_progress_handler.Enabled = true;
+            m_progress_handler.Enable();
             if (m_rendering_mode == RenderingMode.IN_CORE) {
                 Task t = Task.Run(() => {
                     switch (m_volume_dataset.Metadata.ColorDepth) {
