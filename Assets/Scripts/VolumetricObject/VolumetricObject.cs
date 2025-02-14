@@ -25,6 +25,7 @@ namespace UnityCTVisualizer {
         private readonly int SHADER_MAX_ITERATIONS_ID = Shader.PropertyToID("_MaxIterations");
         private readonly int SHADER_BRICK_CACHE_USAGE_BUFFER = Shader.PropertyToID("_BrickCacheUsageBuffer");
         private readonly int SHADER_BRICK_CACHE_MISSES_BUFFER = Shader.PropertyToID("_BrickCacheMissesBuffer");
+        private readonly int MAX_NBR_BRICK_REQUESTS_PER_FRAME = 10;
 
 
         private VolumetricDataset m_volume_dataset = null;
@@ -302,7 +303,7 @@ namespace UnityCTVisualizer {
             if (m_rendering_mode == RenderingMode.IN_CORE) {
                 StartCoroutine(LoadAllBricks());
             } else {
-                // TODO
+                StartCoroutine(HandleGPURequests());
             }
         }
 
@@ -441,6 +442,142 @@ namespace UnityCTVisualizer {
 
             Debug.Log($"uploading all {total_nbr_bricks} bricks to GPU took: {stopwatch.Elapsed}s");
         }
+
+        private int GetGPUBrickRequests(ref UInt32[] brick_requests) {
+            return 0;
+        }
+
+        private void ImportBricks(UInt32[] brick_ids, int len) {
+            Task t = Task.Run(() => {
+                switch (m_volume_dataset.Metadata.ColorDepth) {
+                    case ColorDepth.UINT8:
+                    for (int i = 0; i < len; ++i) {
+                        Importer.ImportBrick(m_volume_dataset.Metadata, brick_ids[i], m_brick_size, m_cache_uint8);
+                    }
+                    break;
+                    case ColorDepth.UINT16:
+                    for (int i = 0; i < len; ++i) {
+                        Importer.ImportBrick(m_volume_dataset.Metadata, brick_ids[i], m_brick_size, m_cache_uint16);
+                    }
+                    break;
+                    default:
+                    throw new NotImplementedException();
+                }
+            });
+            t.ContinueWith(t => { Debug.LogException(t.Exception); }, TaskContinuationOptions.OnlyOnFaulted);
+        }
+
+        public IEnumerator HandleGPURequests() {
+
+            // make sure to only start when all dependencies are initialized
+            yield return new WaitUntil(() => (m_volume_dataset != null) && (m_transfer_function != null) && (m_brick_cache != null));
+
+            Debug.Log("started handling GPU brick requests");
+
+            CVDSMetadata metadata = m_volume_dataset.Metadata;
+            long nbr_bricks_uploaded = 0;
+            int nbr_bricks_uploaded_per_frame = 0;
+            CommandBuffer cmd_buffer = new();
+            GCHandle[] handles = new GCHandle[m_volume_dataset.MAX_BRICK_UPLOADS_PER_FRAME];
+            Vector3 brick_scale = new(
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x * metadata.ChunkSize),
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y * metadata.ChunkSize),
+                m_brick_size / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z * metadata.ChunkSize)
+            );
+
+            UInt32[] brick_requests = new UInt32[MAX_NBR_BRICK_REQUESTS_PER_FRAME];
+
+            while (true) {
+
+                // wait until current frame rendering is done ...
+                yield return new WaitForEndOfFrame();
+
+                // we can safely assume that bricks uploaded to GPU in previous frame are done
+                nbr_bricks_uploaded += nbr_bricks_uploaded_per_frame;
+
+                // notify GC that it is free to manage previous frame's bricks
+                for (int i = 0; i < nbr_bricks_uploaded_per_frame; ++i)
+                    handles[i].Free();
+                nbr_bricks_uploaded_per_frame = 0;
+                m_tex_params_pool.ReleaseAll();
+
+                // get bricks requested by GPU
+                int nbr_requested_bricks = GetGPUBrickRequests(ref brick_requests);
+
+                // import relevant chunks (again a chunk is a persistent memory unit while a brick is a GPU unit)
+                ImportBricks(brick_requests, nbr_requested_bricks);
+
+                // upload requested bricks to the GPU from the bricks reply queue
+                while (
+                    nbr_bricks_uploaded_per_frame < m_volume_dataset.MAX_BRICK_UPLOADS_PER_FRAME &&
+                    m_brick_reply_queue.TryDequeue(out UInt32 brick_id)
+                ) {
+
+                    // we are sending a managed object to unmanaged thread (i.e., C++) the object has to be pinned to a
+                    // fixed location in memory during the plugin call
+                    switch (metadata.ColorDepth) {
+                        case ColorDepth.UINT8: {
+                            var brick = m_cache_uint8.Get(brick_id);
+                            Assert.IsNotNull(brick);
+                            handles[nbr_bricks_uploaded_per_frame] = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
+                            break;
+                        }
+                        case ColorDepth.UINT16: {
+                            var brick = m_cache_uint16.Get(brick_id);
+                            Assert.IsNotNull(brick);
+                            handles[nbr_bricks_uploaded_per_frame] = GCHandle.Alloc(brick.data, GCHandleType.Pinned);
+                            break;
+                        }
+                        default:
+                        throw new NotImplementedException();
+                    }
+
+                    // compute where the brick offset within the brick cache
+                    m_volume_dataset.ComputeVolumeOffset(brick_id, m_brick_size, out Int32 x, out Int32 y, out Int32 z);
+
+                    // allocate the plugin call's arguments struct
+                    TextureSubImage3DParams args = new() {
+                        texture_handle = m_brick_cache_ptr,
+                        xoffset = x,
+                        yoffset = y,
+                        zoffset = z,
+                        width = m_brick_size,
+                        height = m_brick_size,
+                        depth = m_brick_size,
+                        data_ptr = handles[nbr_bricks_uploaded_per_frame].AddrOfPinnedObject(),
+                        level = 0,
+                        format = m_tex_plugin_format
+                    };
+                    m_tex_params_pool.Acquire(args, out IntPtr arg_ptr);
+                    cmd_buffer.IssuePluginEventAndData(API.GetRenderEventFunc(), (int)TextureSubPlugin.Event.TextureSubImage3D,
+                        arg_ptr);
+
+#if DEBUG_VERBOSE_2
+                    Debug.Log($"brick id: i={brick_id}; volume offset: x={x} y={y} z={z}");
+#endif
+
+                    if (InstantiateBrickWireframes) {
+                        GameObject brick_wireframe = Instantiate(m_brick_wireframe, gameObject.transform, false);
+                        brick_wireframe.GetComponent<MeshFilter>().sharedMesh = m_wireframe_cube_mesh;
+                        brick_wireframe.transform.localPosition = new Vector3(
+                            (x / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].x * metadata.ChunkSize) - 0.5f) + brick_scale.x / 2.0f,
+                            (y / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].y * metadata.ChunkSize) - 0.5f) + brick_scale.y / 2.0f,
+                            (z / (float)(metadata.NbrChunksPerResolutionLvl[m_resolution_lvl].z * metadata.ChunkSize) - 0.5f) + brick_scale.z / 2.0f
+                        );
+                        brick_wireframe.transform.localScale = brick_scale;
+                        brick_wireframe.name = $"brick_{brick_id & 0x03FFFFFF}_res_lvl_{brick_id >> 26}";
+                    }
+                    ++nbr_bricks_uploaded_per_frame;
+
+                }  // END WHILE
+
+                // we execute the command buffer instantly
+                Graphics.ExecuteCommandBuffer(cmd_buffer);
+                cmd_buffer.Clear();
+
+            }  // END WHILE
+
+        }  // END COROUTINE
 
         /*
         private void ResetBrickCacheUsageBuffer() {

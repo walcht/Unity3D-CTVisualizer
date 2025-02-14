@@ -141,24 +141,6 @@ namespace UnityCTVisualizer {
             z = brick_size * (id / (nbr_bricks_x * nbr_bricks_y));
         }
 
-        /// <summary>
-        ///     Given a <paramref name="brick_id"/>, sends the respective volume brick to GPU's
-        ///     brick cache or to the densities texture in case IN_CORE is set.
-        /// </summary>
-        ///
-        /// <remarks>
-        ///     In case of in-core rendering (i.e., IN_CORE is set), the brick is simply loaded
-        ///     into its original offset in the volume. In case of out-of-core rendering, two
-        ///     scenarios arrise:
-        ///     
-        ///     <list type="number">
-        ///         <item>there is an empty brick slot in the brick cache => brick is put there</item>
-        ///         <item>there isn't any empty brick slots => a cache replacement policy</item>
-        ///     </list>
-        ///     
-        /// </remarks>
-        public void LoadBrick(Vector3Int brick_cache_offset, byte[] brick_data) { }
-
         private void OnEnable() {
             if (m_TransferFunctions == null) {
                 m_TransferFunctions = new Dictionary<TF, ITransferFunction> { { TF.TF1D, TransferFunctionFactory.Create(TF.TF1D) } };
